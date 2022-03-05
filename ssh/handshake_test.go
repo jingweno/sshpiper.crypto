@@ -560,3 +560,58 @@ func TestHandshakeRekeyDefault(t *testing.T) {
 		t.Errorf("got rekey after %dG write, want 64G", wgb)
 	}
 }
+
+func TestHandshakeExtInfoSignal(t *testing.T) {
+	clientConf := &ClientConfig{
+		Config: Config{
+			// Act like we "support" extensions exchange.
+			KeyExchanges: append(preferredKexAlgos, "ext-info-c"),
+		},
+		HostKeyCallback: InsecureIgnoreHostKey(),
+	}
+	trC, trS, err := handshakePair(clientConf, "addr", false)
+	if err != nil {
+		t.Fatalf("handshakePair: %v", err)
+	}
+	defer trC.Close()
+	defer trS.Close()
+
+	packet, err := trC.readPacket()
+	if err != nil {
+		t.Fatalf("readPacket 1: %v", err)
+	}
+	if packet[0] != msgExtInfo {
+		t.Errorf("got packet %v, want packet type %d", packet, msgExtInfo)
+	}
+
+	var extInfo extInfoMsg
+	if err := Unmarshal(packet, &extInfo); err != nil {
+		t.Fatalf("unable to unmarshal packet: %v", err)
+	}
+
+	if extInfo.NumExtensions != 1 {
+		t.Errorf("want 1 extension but received %d extensions", extInfo.NumExtensions)
+	}
+
+	if extInfo.Extension != "server-sig-algs" {
+		t.Errorf("want server-sig-algs but received %s", extInfo.Extension)
+	}
+
+	if len(serverSigAlgs) != len(extInfo.Algorithms) {
+		t.Errorf("expected %d server-sig-algs but received %d",
+			len(serverSigAlgs), len(extInfo.Algorithms))
+	}
+
+	for _, expected := range serverSigAlgs {
+		foundAlg := false
+		for _, found := range extInfo.Algorithms {
+			if expected == found {
+				foundAlg = true
+				break
+			}
+		}
+		if !foundAlg {
+			t.Errorf("could not find expected alg '%s' in server-sig-algs", expected)
+		}
+	}
+}
